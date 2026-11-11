@@ -1,0 +1,131 @@
+apply plugin: 'com.android.library'
+apply from: '../shared/keepUnitySymbols.gradle'
+apply from: '../shared/common.gradle'
+
+dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+    implementation(name: 'tobservicelib-release', ext:'aar')
+    implementation(name: 'tob_api-release', ext:'aar')
+    implementation(name: 'capturelib-release', ext:'aar')
+    implementation(name: 'PxrPlatform', ext:'aar')
+    implementation(name: 'LoaderForUnitySDK_1_1_0', ext:'aar')
+    implementation(name: 'CameraRenderingPlugin', ext:'aar')
+    implementation(name: 'platformloader', ext:'aar')
+    implementation project(':unityLibrary:xrmanifest.androidlib')
+    implementation 'androidx.games:games-frame-pacing:2.1.2'
+}
+
+android {
+    namespace "com.unity3d.player"
+    ndkPath "/Applications/Unity/Hub/Editor/6000.5.5f1/PlaybackEngines/AndroidPlayer/NDK"
+    ndkVersion "27.2.12479018"
+    compileSdk 36
+    buildToolsVersion "36.0.0"
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    defaultConfig {
+        consumerProguardFiles "proguard-unity.txt"
+        minSdk 29
+        targetSdk 36
+
+        ndk {
+            abiFilters "arm64-v8a"
+            debugSymbolLevel "none"
+        }
+
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_STL=c++_shared", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
+            }
+        }
+    }
+
+    lint {
+        abortOnError false
+    }
+
+    androidResources {
+        ignoreAssetsPattern = "!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~"
+        noCompress = ['.unity3d', '.ress', '.resource', '.obb', '.bundle', '.unityexp'] + unityStreamingAssets.tokenize(', ')
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging true
+        }
+    }
+}
+
+
+android.externalNativeBuild {
+    cmake {
+        version "3.22.1"
+        path "src/main/cpp/CMakeLists.txt"
+    }
+}
+
+android.buildFeatures {
+    prefab true
+}
+
+// IL2CPP 已在本地预编译：libil2cpp.so 位于 src/main/jniLibs/arm64-v8a，打包时不再编译 IL2CPP。
+// 本地导出时生成的 Il2CppOutputProject 已移除（打包机不编译 IL2CPP）。
+
+def getSdkDir() {
+    Properties local = new Properties()
+    local.load(new FileInputStream("${rootDir}/local.properties"))
+    return local.getProperty('sdk.dir')
+}
+
+def getIl2CppOutputPath(String workingDir, String abi) {
+    return "${workingDir}/src/main/jniLibs/${abi}/libil2cpp.so";
+}
+
+def getIl2CppSymbolPath(String workingDir, String abi) {
+    return "${workingDir}/symbols/${abi}/libil2cpp.so";
+}
+
+// Convert MSVC error with path(column, line) to Android Studio clickable links
+// C:/Test.cpp(232,5): error: some error -> C:/Test.cpp:232 Column 5: error: some error
+// /Test.cpp(232,5): error: some error -> /Test.cpp:232 Column 5: error: some error
+def convertPathsWithLineNumbersToHyperlink(String contents) {
+    if (contents == null)
+        return null
+    return contents.replaceAll(
+        /((?:[A-Za-z]:)?[^()\s]+\.(?:h|hpp|c|cc|cpp))\((\d+),(\d+)\):/,
+        '$1:$2 Column $3:'
+    )
+}
+
+def execCommand(String workDir, List<String> command, Map<String, String> env = [:]) {
+    def execOutput = providers.exec {
+        workingDir workDir
+        commandLine command
+        environment env
+        ignoreExitValue true
+    }
+
+    def exitValue = execOutput.result.get().getExitValue()
+    def stdout = execOutput.standardOutput.asText.get()
+    def stderr = execOutput.standardError.asText.get()
+
+    if (exitValue != 0) {
+        def error = new StringBuilder()
+        error.append("Command execution failed with exit code: $exitValue\n");
+        error.append("Working Directory: ${workDir}\n");
+        error.append("Environment Variables:\n");
+        env.each { key, value ->
+            error.append(" - ${key} = ${value}\n")
+        }
+        error.append("Command Line:\n${command.join(' ')}\n");
+        error.append(convertPathsWithLineNumbersToHyperlink(stdout));
+        error.append(convertPathsWithLineNumbersToHyperlink(stderr));
+        throw new GradleException(error.toString())
+    } else {
+        println "$stdout\n$stderr"
+    }
+}
